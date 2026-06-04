@@ -3,7 +3,8 @@
 Personal-use MCP server for **NUEiP 雲端人資系統** (cloud.nueip.com). Drives
 the XHR endpoints the web UI uses, behind a simulated login. Lets any MCP
 client (Claude Code, Claude Desktop, …) query attendance / leave balance /
-team leaves / pending approvals from natural-language prompts.
+team leaves / team attendance / pending approvals from natural-language
+prompts.
 
 > ⚠️ **Personal use only.** 不要架在 shared / multi-user 機器、不要 commit
 > 密碼、不要在 `~/.claude.json` 放明文密碼。用 macOS Keychain（見下方
@@ -17,7 +18,7 @@ team leaves / pending approvals from natural-language prompts.
 > 外洩、法律責任等）由使用者自行承擔，作者不負任何責任。詳見文末
 > [License](#license)。
 
-> 💡 **配套 Claude Code Skill**：[`tankfinal/agent-skills-pub`](https://github.com/tankfinal/agent-skills-pub) — `/toolkit-pub:nueip` 把 5 個工具包成單一入口、8 個子指令（today / week / recent / team / pending / balance / brief / me），比直接喊工具好用。
+> 💡 **配套 Claude Code Skill**：[`tankfinal/agent-skills-pub`](https://github.com/tankfinal/agent-skills-pub) — `/toolkit-pub:nueip` 把常用工具包成單一入口、8 個子指令（today / week / recent / team / pending / balance / brief / me），比直接喊工具好用。`team_attendance`（manager 視角部門出勤）目前還沒進 wrapper，要用直接呼叫 `mcp__nueip__team_attendance`。
 
 ---
 
@@ -28,6 +29,7 @@ team leaves / pending approvals from natural-language prompts.
 | `my_attendance(start_date?, end_date?)` | 我的出勤紀錄；省略日期則查今日 |
 | `my_leave_balance(year?, raw?)` | 我的假期餘額。預設瘦身模式（同 `v_name` group_by + 本期 only），數字直接對齊 NUEiP UI 顯示；要全部桶做 audit 才設 `raw=true` |
 | `team_leaves(start_date?, end_date?, scope?, filt_method?)` | 部門 / 子部門當日請假；`scope`=`dept` (預設) / `team`；`filt_method`=`passed` / `ongoing` / `all` |
+| `team_attendance(start_date?, end_date?, scope?, name_filter?, raw?)` | 🔒 主管：部門 / 子部門出勤紀錄。`scope`=`dept` (預設) / `team`；`name_filter` 姓名子字串（case-insensitive）。預設 slim view 一列 (user, date)，含打卡時間、遲到 / 早退分鐘、工時、`has_leave`。`raw=true` 回原始 payload（單月 30 人約 1-2 MB） |
 | `pending_approvals(type_?, scope?, start_date?, end_date?)` | 待我簽核項目；`type_`=`leave` (預設) / `overtime` / `attendance` / `business_trip` …。`attendance` 類別多回傳當天實際打卡 + 補卡後仍差秒數，方便判斷 |
 | `whoami` | 印出 公司 / 部門 / user ID（除錯用） |
 
@@ -192,6 +194,7 @@ Reverse-engineered from the NUEiP web UI:
 | my_attendance | `POST /attendance_record/ajax` | date filter via `Search_124_*` cookies; needs `X-Csrf-Token`, `Fe-Pno: 124` |
 | my_leave_balance | `POST /personal_leave_resource` | layer + year + date range in form; `Fe-Pno: 44` |
 | team_leaves | `POST /leave_application/personal_leave_application_manager/` | `employee=COMP_DEPT_all`; `Fe-Pno: 303` |
+| team_attendance | `POST /attendance_record/ajax` | 同 my_attendance；`Search_124_FLayer/SLayer/TLayer` cookies 帶部門 / 子部門 layer（`COMP_DEPT_all` 或 own subdept）；`Fe-Pno: 124` |
 | pending_approvals | `POST /leader_audit_work_list/index/{type}` | `Fe-Pno: 225` |
 | whoami | scrapes `my_cmpny / my_dept / my_deptsn` from leave page + decodes `cuid` cookie | — |
 
