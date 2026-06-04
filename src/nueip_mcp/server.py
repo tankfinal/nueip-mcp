@@ -101,6 +101,35 @@ def pending_approvals(
 
 
 @mcp.tool()
+def team_attendance(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    scope: str = "dept",
+    name_filter: str | None = None,
+    raw: bool = False,
+) -> dict[str, Any]:
+    """查團隊／部門出勤紀錄（manager view）。日期格式 YYYY-MM-DD。
+
+    scope: "dept" = 整個部門 (預設) / "team" = 我的子部門。
+    name_filter: 姓名子字串過濾（case-insensitive，match NUEiP usr_name，可含中英文）。
+    raw=True: 回 NUEiP 原始 payload（單月 30 人約 1-2 MB）；
+    預設 slim view 回 {rows, count}，每列為 (user, date) 一筆，欄位：
+    date, u_sn, name, dept, off_day, holiday, worktime, on_punch, off_punch,
+    late, late_min, leave_early, leave_early_min, durhour, durmin, has_leave。
+
+    NUEiP 的 `late` 欄位是以 NUEiP 公司排班時間（如 09:00）為基準；要用其他
+    遲到定義（例：> 10:00），請改看 on_punch 時間自行判定。
+    """
+    return _get_client().team_attendance(
+        start_date=start_date,
+        end_date=end_date,
+        scope=scope,
+        name_filter=name_filter,
+        raw=raw,
+    )
+
+
+@mcp.tool()
 def whoami() -> dict[str, Any]:
     """Diagnostic — 顯示登入後解析出的公司/部門/使用者 ID。"""
     return _get_client().whoami()

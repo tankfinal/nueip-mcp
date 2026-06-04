@@ -641,6 +641,111 @@ class NueipClient:
             }
             item["summary"] = _build_attendance_summary(item, on_actual, off_actual, request_time)
 
+    def team_attendance(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        scope: str = "dept",
+        name_filter: str | None = None,
+        raw: bool = False,
+        group_size: int = 1000,
+    ) -> dict:
+        """List dept/team attendance records between two dates (manager view).
+
+        scope: "dept" = whole dept (FLayer_dept_all), "team" = own subdept.
+        name_filter: case-insensitive substring match on usr_name (e.g. "john lin").
+        raw=True returns the NUEiP payload unchanged (~MB for a month of a 30-person
+        dept); the default slim view is one row per (user, date) with punch times,
+        late_min, leave_early_min, durhour/durmin, and a `has_leave` flag.
+        """
+        ctx = self._ctx_or_fetch()
+        today = dt.date.today().isoformat()
+        s = start_date or today
+        e = end_date or today
+
+        if scope == "dept":
+            slayer = ctx.slayer
+            tlayer = f"{ctx.cmpny}_{ctx.dept}_all"
+        else:
+            slayer = ctx.slayer
+            tlayer = ctx.tlayer
+
+        cookies = {
+            "Search_124_work_status": "1",
+            "Search_124_FLayer": ctx.flayer,
+            "Search_124_SLayer": slayer,
+            "Search_124_TLayer": tlayer,
+            "Search_124_date_start": s,
+            "Search_124_date_end": e,
+            "Search_124_showByBelongDate": "1",
+            "Search_124_filterModify": "0",
+        }
+        data = {
+            "action": "attendance",
+            "loadInBatch": "1",
+            "loadBatchGroupNum": str(group_size),
+            "loadBatchNumber": "1",
+            "work_status": "1",
+        }
+        result = self._xhr(
+            ATTENDANCE_URL,
+            fe_pno=FE_PNO["attendance"],
+            data=data,
+            extra_cookies=cookies,
+            referer=f"{BASE}/attendance_record",
+        )
+        if raw and not name_filter:
+            return result
+        return self._slim_team_attendance(result, name_filter)
+
+    @staticmethod
+    def _slim_team_attendance(result: dict, name_filter: str | None = None) -> dict:
+        """Slim attendance payload to per-(user, date) rows.
+
+        Keeps off-days / holidays as rows with empty punch fields so callers
+        can still see the calendar shape. `on_punch` is the first valid
+        on-punch HH:MM:SS; `off_punch` is the last off-punch.
+        """
+        nf = (name_filter or "").lower()
+        rows: list[dict] = []
+        data = result.get("data") or {}
+        for date_str in sorted(data.keys()):
+            per_user = data[date_str] or {}
+            for u_sn, rec in per_user.items():
+                user = rec.get("user") or {}
+                name = user.get("name") or ""
+                if nf and nf not in name.lower():
+                    continue
+                dinfo = rec.get("dateInfo") or {}
+                att = rec.get("attendance") or {}
+                punch = rec.get("punch")
+                if isinstance(punch, dict):
+                    on_p = punch.get("onPunch") or []
+                    off_p = punch.get("offPunch") or []
+                else:
+                    on_p, off_p = [], []
+                on_time = on_p[0].get("time") if on_p else None
+                off_time = off_p[-1].get("time") if off_p else None
+                rows.append({
+                    "date": date_str,
+                    "u_sn": u_sn,
+                    "name": name,
+                    "dept": user.get("deptname"),
+                    "off_day": bool(dinfo.get("date_off")),
+                    "holiday": dinfo.get("holiday") or "",
+                    "worktime": rec.get("worktime") or "",
+                    "on_punch": on_time,
+                    "off_punch": off_time,
+                    "late": att.get("late") == "1",
+                    "late_min": int(att.get("latemin") or 0),
+                    "leave_early": att.get("leave_early") == "1",
+                    "leave_early_min": int(att.get("leaveearlymin") or 0),
+                    "durhour": att.get("durhour"),
+                    "durmin": att.get("durmin"),
+                    "has_leave": bool(rec.get("timeoff")),
+                })
+        return {"rows": rows, "count": len(rows)}
+
     def _attendance_dept_day(self, d_sn: str, belong_date: str) -> dict:
         """Fetch attendance for a single dept-day, keyed by u_sn.
 
